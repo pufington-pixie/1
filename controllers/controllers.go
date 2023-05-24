@@ -7,7 +7,8 @@ import (
 
 	"example.com/database"
 	"example.com/models"
-	"github.com/gorilla/mux"
+	"github.com/go-chi/chi"
+
 )
 
 // POST /projects
@@ -95,7 +96,7 @@ func DeleteProject(w http.ResponseWriter, r *http.Request) {
 
 func getProjectID(r *http.Request) int {
   // get project ID from URL params
-  vars := mux.Vars(r)
-  id, _ := strconv.Atoi(vars["id"])
-  return id
+  id := chi.URLParam(r, "id")
+  idNum, _ := strconv.Atoi(id)
+  return idNum
 }
