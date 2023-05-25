@@ -1,102 +1,264 @@
-package controllers
+package controller
 
 import (
+	"database/sql"
 	"encoding/json"
-	"net/http"
+	"fmt"
+	"io"
 	"strconv"
+
+	"log"
+	"net/http"
 
 	"example.com/database"
 	"example.com/models"
 	"github.com/go-chi/chi"
-
 )
 
-// POST /projects
-func CreateProject(w http.ResponseWriter, r *http.Request) {
-  // parse request body and validate
-  var project models.Project
-  err := json.NewDecoder(r.Body).Decode(&project)
-  if err != nil {
-    w.WriteHeader(http.StatusBadRequest)
-    return
+// GetDB returns a database object
+func GetDB() (*sql.DB) {
+  db,err := database.ConnectDB()
+  if err!=nil{
+      log.Fatal(err)
   }
-  // create new Project model
-  database.CreateProject(project)
-  // return 201 Created
-  w.WriteHeader(http.StatusCreated)
+  return db
+}
+//insert project
+func InsertProject(w http.ResponseWriter, r *http.Request) {
+	var response models.Response
+
+	// Parse JSON request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Print(err)
+		response.Status = 400
+		response.Message = "Bad Request"
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Define a struct to hold the JSON data
+	var project models.Project
+	err = json.Unmarshal(body, &project)
+	if err != nil {
+		log.Print(err)
+		response.Status = 400
+		response.Message = "Bad Request"
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	db := GetDB()
+	defer db.Close()
+
+	// Prepare the SQL statements
+	projectQuery := "INSERT INTO projects (title, date, sapnumber, notes, branchId, statusId, serviceId) VALUES (?, ?, ?, ?, ?, ?, ?)"
+	serviceQuery := "INSERT INTO services (id, name) VALUES (?, ?) ON DUPLICATE KEY UPDATE name = ?"
+
+	// Insert or update the service in the services table
+	_, err = db.Exec(serviceQuery, project.Service.ID, project.Service.Name, project.Service.Name)
+	if err != nil {
+		log.Print(err)
+		response.Status = 500
+		response.Message = "Internal Server Error"
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Insert project into the projects table
+	_, err = db.Exec(projectQuery, project.Title, project.Date, project.SAPNumber, project.Notes, project.BranchID, project.StatusID, project.Service.ID)
+	if err != nil {
+		log.Print(err)
+		response.Status = 500
+		response.Message = "Internal Server Error"
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response.Status = 200
+	response.Message = "Insert data successfully"
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	json.NewEncoder(w).Encode(response)
 }
 
-// GET /projects
-func GetProjects(w http.ResponseWriter, r *http.Request) {
-  // query database for list of projects
-  projects := database.GetProjects()
-  // return projects as JSON
-  w.Header().Set("Content-Type", "application/json")
-  json.NewEncoder(w).Encode(projects)
-}
 
-// GET /projects/{id}
-func GetProject(w http.ResponseWriter, r *http.Request) {
-  // get project ID from URL params
-  id := getProjectID(r)
-  // query database and get project with that ID
-  project := database.GetProject(id)
-  if project == nil {
-    // return 404 if not found
-    w.WriteHeader(http.StatusNotFound)
-    return
-  }
-  // return project as JSON 
-  w.Header().Set("Content-Type", "application/json")
-  json.NewEncoder(w).Encode(project)
-}
-
-// PUT /projects/{id}
 func UpdateProject(w http.ResponseWriter, r *http.Request) {
-  // get project ID from URL params
-  id := getProjectID(r)
-  // parse request body and validate
-  var project models.Project
-  err := json.NewDecoder(r.Body).Decode(&project)
+	var response models.Response
+
+	db := GetDB()
+	defer db.Close()
+
+	// Read JSON request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Fatal(err.Error())
+		response.Status = 400
+		response.Message = "Bad Request"
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Parse JSON request body
+	var project models.Project
+	err = json.Unmarshal(body, &project)
+	if err != nil {
+		log.Fatal(err.Error())
+		response.Status = 400
+		response.Message = "Bad Request"
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Prepare the SQL statements
+	projectQuery := "UPDATE projects SET title = ?, sapnumber = ?, notes = ?, branchId = ?, statusId = ?, serviceId = ? WHERE id = ?"
+	serviceQuery := "INSERT INTO services (id, name) VALUES (?, ?) ON DUPLICATE KEY UPDATE name = ?"
+
+	// Update project data in the database
+	_, err = db.Exec(projectQuery, project.Title, project.SAPNumber, project.Notes, project.BranchID, project.StatusID, project.Service.ID, project.ID)
+	if err != nil {
+		log.Print(err)
+		response.Status = 500
+		response.Message = "Internal Server Error"
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Update or insert the service data in the database
+	_, err = db.Exec(serviceQuery, project.Service.ID, project.Service.Name, project.Service.Name)
+	if err != nil {
+		log.Print(err)
+		response.Status = 500
+		response.Message = "Internal Server Error"
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response.Status = 200
+	response.Message = "Update data successfully"
+	fmt.Print("Update data in the database")
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	json.NewEncoder(w).Encode(response)
+}
+
+// GetProject = Select Project API
+func GetProject(w http.ResponseWriter, r *http.Request) {
+  var response models.Response
+  var arrProject []models.Project
+
+  db := GetDB()
+  defer db.Close()
+
+  rows, err := db.Query("SELECT p.id, p.title,  p.sapnumber, p.notes, p.branchid, p.statusid, s.id, s.name "+
+      "FROM projects p "+
+      "JOIN services s ON p.serviceid = s.id")
   if err != nil {
-    w.WriteHeader(http.StatusBadRequest)
-    return
+      log.Print(err)
+      response.Status = 500
+      response.Message = "Internal Server Error"
+      json.NewEncoder(w).Encode(response)
+      return
   }
-  // query database and get project with that ID
-  projectPtr := database.GetProject(id)
-  if projectPtr == nil {
-    // return 404 if not found
-    w.WriteHeader(http.StatusNotFound)
-    return
+
+  for rows.Next() {
+      var project models.Project
+      var service models.Service
+      err = rows.Scan(&project.ID, &project.Title, &project.SAPNumber, &project.Notes, &project.BranchID, &project.StatusID, &service.ID, &service.Name)
+
+      if err != nil {
+          log.Fatal(err.Error())
+          response.Status = 500
+          response.Message = "Internal Server Error"
+          json.NewEncoder(w).Encode(response)
+          return
+      }
+
+      project.Service = service
+      arrProject = append(arrProject, project)
   }
-  // update project fields
-  projectPtr.Name = project.Name   // etc...
-  // save updated project to database
-  database.UpdateProject(*projectPtr)
-  // return 204 No Content
-  w.WriteHeader(http.StatusNoContent)
+
+  response.Status = 200
+  response.Message = "Success"
+  response.Data = arrProject
+
+  w.Header().Set("Content-Type", "application/json")
+  w.Header().Set("Access-Control-Allow-Origin", "*")
+  json.NewEncoder(w).Encode(response)
+}
+func GetProjectByID(w http.ResponseWriter, r *http.Request) {
+	var response models.Response
+
+	idStr := chi.URLParam(r, "id")
+  id, err := strconv.Atoi(idStr)
+	if err != nil {
+		log.Print(err)
+		
+		return
+	}
+
+	db := GetDB()
+	defer db.Close()
+
+	project := models.Project{}
+	err = db.QueryRow("SELECT p.id, p.title, p.date, p.sapnumber, p.notes, p.branchId, p.statusId, p.serviceId, s.name FROM projects p JOIN services s ON p.serviceId = s.id WHERE p.id = ?", id).
+		Scan(&project.ID, &project.Title, &project.Date, &project.SAPNumber, &project.Notes, &project.BranchID, &project.StatusID, &project.Service.ID, &project.Service.Name)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Printf("No Project with that ID.")
+			response.Status = 404
+			response.Message = "Project not found"
+		} else {
+			log.Fatal(err.Error())
+			response.Status = 500
+			response.Message = "Internal Server Error"
+		}
+	} else {
+		response.Status = 200
+		response.Message = "Success"
+		response.Data = project
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	json.NewEncoder(w).Encode(response)
 }
 
-// DELETE /projects/{id}
 func DeleteProject(w http.ResponseWriter, r *http.Request) {
-  // get project ID from URL params
-  id := getProjectID(r)
-  // query database and get project with that ID
-  project := database.GetProject(id)
-  if project == nil {
-    // return 404 if not found
-    w.WriteHeader(http.StatusNotFound)
-    return
-  }
-  // delete project from database
-  database.DeleteProject(id)
-  // return 204 No Content
-  w.WriteHeader(http.StatusNoContent) 
-}
+	var response models.Response
 
-func getProjectID(r *http.Request) int {
-  // get project ID from URL params
-  id := chi.URLParam(r, "id")
-  idNum, _ := strconv.Atoi(id)
-  return idNum
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		log.Print(err)
+		response.Status = 400
+		response.Message = "Bad Request"
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	db := GetDB()
+	defer db.Close()
+
+	_, err = db.Exec("DELETE FROM projects WHERE id = ?", id)
+	if err != nil {
+		log.Print(err)
+		response.Status = 500
+		response.Message = "Internal Server Error"
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response.Status = 200
+	response.Message = "Delete data successfully"
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	json.NewEncoder(w).Encode(response)
 }
