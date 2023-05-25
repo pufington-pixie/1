@@ -1,0 +1,26 @@
+
+
+CREATE TABLE services (
+    id INT PRIMARY KEY,
+    name VARCHAR(255)
+);
+
+CREATE TABLE projects (
+    id  INT PRIMARY KEY,
+    title VARCHAR(255),
+    date DATE,
+    sapnumber VARCHAR(255),
+    notes VARCHAR(255),
+    branchId INT,
+    statusId INT,
+    serviceId INT,
+    CONSTRAINT projects_relation_1 FOREIGN KEY (serviceId) REFERENCES services(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+
+
+
+
+
+
+
